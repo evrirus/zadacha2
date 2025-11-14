@@ -1,2 +1,2 @@
 package_name,repo_url_or_path,repo_mode,ascii_tree,filter_substring
-busybox,C:\Users\kovalskiy\Downloads\APKINDEX.tar.gz,local,on,busy
+busybox,https://dl-cdn.alpinelinux.org/alpine/v3.18/main/x86_64/,remote,on,zstd

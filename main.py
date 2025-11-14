@@ -83,14 +83,16 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if cfg["ascii_tree"] not in VALID_ASCII_TREE_MODES:
         errors.append(f"ascii_tree должен быть одним из {VALID_ASCII_TREE_MODES}")
 
-    if cfg["filter_substring"] is None:
-        errors.append("filter_substring не должен быть пустым (можно оставить пустую строку).")
+    if "filter_substring" not in cfg:
+        errors.append("filter_substring должен присутствовать (пустая строка допустима).")
 
     if errors:
         raise ConfigError("\n".join(errors))
 
-    return cfg
+        # Если пустая строка — оставляем так
+    cfg.setdefault("filter_substring", "")
 
+    return cfg
 
 
 # этап 2
@@ -193,12 +195,19 @@ def build_graph(records: List[Dict[str, str]], filter_substr: str) -> Dict[str, 
     graph = {}
     for rec in records:
         pkg = rec.get("P")
-        if not pkg or filter_substr in pkg:
+        if not pkg:
             continue
+        # только если filter_substr непустой
+        if filter_substr and filter_substr in pkg:
+            continue
+
         dep_field = rec.get("D", "")
-        deps = [d for d in dep_field.split() if filter_substr not in d]
+        # фильтруем зависимости аналогично
+        deps = [d for d in dep_field.split() if not filter_substr or filter_substr not in d]
+
         graph[pkg] = deps
     return graph
+
 
 def build_graph_from_testfile(path: Path, filter_substr: str) -> Dict[str, List[str]]:
     graph = {}
