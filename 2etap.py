@@ -6,17 +6,6 @@ from pathlib import Path
 from typing import Dict, Any, List
 from urllib.request import urlopen
 
-"""
-Примеры config
-
-
-package_name,repo_url_or_path,repo_mode,ascii_tree,filter_substring
-busybox,https://dl-cdn.alpinelinux.org/alpine/v3.18/main/x86_64/,remote,on,busy
-
-package_name,repo_url_or_path,repo_mode,ascii_tree,filter_substring
-busybox,{путь до директории где находится архив tar.gz},local,on,busy
-"""
-
 REQUIRED_KEYS = {
     "package_name",
     "repo_url_or_path",
@@ -37,6 +26,7 @@ class ApkIndexError(Exception):
 
 def is_url(s: str) -> bool:
     return s.startswith("http://") or s.startswith("https://")
+
 
 
 def load_config(csv_path: str) -> Dict[str, Any]:
@@ -63,6 +53,7 @@ def load_config(csv_path: str) -> Dict[str, Any]:
 
     return config
 
+
 def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     errors = []
 
@@ -83,16 +74,14 @@ def validate_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if cfg["ascii_tree"] not in VALID_ASCII_TREE_MODES:
         errors.append(f"ascii_tree должен быть одним из {VALID_ASCII_TREE_MODES}")
 
-    if "filter_substring" not in cfg:
-        errors.append("filter_substring должен присутствовать (пустая строка допустима).")
+    if cfg["filter_substring"] is None:
+        errors.append("filter_substring не должен быть пустым (можно оставить пустую строку).")
 
     if errors:
         raise ConfigError("\n".join(errors))
 
-        # Если пустая строка — оставляем так
-    cfg.setdefault("filter_substring", "")
-
     return cfg
+
 
 
 # этап 2
@@ -120,28 +109,15 @@ def fetch_index_remote(repo_url: str) -> bytes:
     raise ApkIndexError(f"Не удалось загрузить APKINDEX с {repo_url} ({last_error})")
 
 def fetch_index_local(path: Path) -> bytes:
-    """
-    Локальный режим: путь к конкретному файлу.
-    Поддерживает:
-     - APKINDEX.tar.gz
-     - APKINDEX (не сжатый)
-    """
-    if not path.exists():
-        raise ApkIndexError(f"Файл не найден: {path}")
+    p1 = path / "APKINDEX.tar.gz"
+    p2 = path / "APKINDEX"
 
-    # Проверяем, является ли файл tar.gz
-    if path.suffixes == ['.tar', '.gz'] or path.name.lower() == "apkindex.tar.gz":
-        return path.read_bytes()
+    if p1.exists():
+        return p1.read_bytes()
+    if p2.exists():
+        return p2.read_bytes()
 
-    # Если это обычный APKINDEX
-    if path.name.upper() == "APKINDEX":
-        return path.read_bytes()
-
-    raise ApkIndexError(
-        f"Файл {path} не является APKINDEX.tar.gz или APKINDEX.\n"
-        f"Укажите путь к реальному файлу индекса."
-    )
-
+    raise ApkIndexError(f"В каталоге {path} нет APKINDEX.tar.gz или APKINDEX")
 
 def extract_index(raw: bytes) -> str:
     try:
@@ -190,62 +166,6 @@ def get_package_dependencies(records: List[Dict[str, str]], package: str) -> Lis
 
 
 
-# этап 3
-def build_graph(records: List[Dict[str, str]], filter_substr: str) -> Dict[str, List[str]]:
-    graph = {}
-    for rec in records:
-        pkg = rec.get("P")
-        if not pkg:
-            continue
-        # только если filter_substr непустой
-        if filter_substr and filter_substr in pkg:
-            continue
-
-        dep_field = rec.get("D", "")
-        # фильтруем зависимости аналогично
-        deps = [d for d in dep_field.split() if not filter_substr or filter_substr not in d]
-
-        graph[pkg] = deps
-    return graph
-
-
-def build_graph_from_testfile(path: Path, filter_substr: str) -> Dict[str, List[str]]:
-    graph = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if ":" not in line:
-            continue
-        pkg, deps_str = line.split(":", 1)
-        pkg = pkg.strip()
-        deps = [d.strip() for d in deps_str.split() if filter_substr not in d]
-        if filter_substr not in pkg:
-            graph[pkg] = deps
-    return graph
-
-def dfs_transitive(graph: Dict[str, List[str]], start_pkg: str) -> List[str]:
-    visited = set()
-    stack = [start_pkg]
-    result = []
-
-    while stack:
-        pkg = stack.pop()
-        if pkg in visited:
-            continue
-        visited.add(pkg)
-        result.append(pkg)
-        for dep in graph.get(pkg, []):
-            if dep not in visited:
-                stack.append(dep)
-    result.remove(start_pkg)  # убрать сам пакет из списка зависимостей
-    return result
-
-def print_graph(graph: Dict[str, List[str]]):
-    print("\n=== Граф зависимостей ===")
-    for pkg, deps in graph.items():
-        print(f"{pkg}: {', '.join(deps) if deps else '(нет зависимостей)'}")
-
 def main():
     if len(sys.argv) != 2:
         print("Использование: python app.py path/to/config.csv")
@@ -275,32 +195,6 @@ def main():
                 print(f" - {d}")
         else:
             print(f"У пакета '{pkg}' нет прямых зависимостей.")
-
-
-        # этап 3
-        filter_substr = cfg["filter_substring"]
-
-        if cfg["repo_mode"] == "local":
-            raw = fetch_index_local(Path(repo))
-            text = extract_index(raw)
-            records = parse_apkindex(text)
-            graph = build_graph(records, filter_substr)
-        else:
-            raw = fetch_index_remote(repo)
-            text = extract_index(raw)
-            records = parse_apkindex(text)
-            graph = build_graph(records, filter_substr)
-
-        print_graph(graph)
-
-        # Пример: получить все зависимости для пакета
-        trans_deps = dfs_transitive(graph, pkg)
-        print(f"\nТранзитивные зависимости пакета '{pkg}':")
-        if trans_deps:
-            for d in trans_deps:
-                print(f" - {d}")
-        else:
-            print(" (нет транзитивных зависимостей)")
 
     except ConfigError as e:
         print("Ошибка конфигурации:")
