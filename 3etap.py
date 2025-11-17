@@ -19,7 +19,7 @@ busybox,{путь до директории где находится архив
 package_name - имя пакета
 repo_url_or_path - урл или путь
 repo_mode - как обрабатывать, путь или url
-ascii_tree - 
+ascii_tree - Режим вывода зависимостей
 filter_substring - то, что нужно исключить(из названия)
 """
 
@@ -128,9 +128,6 @@ def fetch_index_remote(repo_url: str) -> bytes:
 def fetch_index_local(path: Path) -> bytes:
     """
     Локальный режим: путь к конкретному файлу.
-    Поддерживает:
-     - APKINDEX.tar.gz
-     - APKINDEX (не сжатый)
     """
     if not path.exists():
         raise ApkIndexError(f"Файл не найден: {path}")
